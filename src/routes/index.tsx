@@ -209,6 +209,73 @@ function SageApp() {
     }
   }, [toast]);
 
+  // Silent refresh — no loading spinner, used by the polling loop
+  const silentRefreshJobs = useCallback(async () => {
+    try {
+      const backendJobs = await api.getJobs();
+      const mapped: Job[] = backendJobs.map((j) => ({
+        id: j.id,
+        title: j.source_title || j.subreddit || "Untitled",
+        subreddit: j.subreddit,
+        status: mapBackendStatus(j.status),
+        created: formatRelativeTime(j.created_at),
+        started: j.started_at ? formatRelativeTime(j.started_at) : null,
+        completed: j.completed_at ? formatRelativeTime(j.completed_at) : null,
+        tts: j.tts_provider,
+        video: j.status === "completed" || !!j.video_url || !!j.uploaded_video_url,
+        video_url: null,
+        access_url: null,
+        error: j.error_message || undefined,
+        logs: [],
+      }));
+      setJobs(mapped);
+    } catch {
+      // Silently ignore poll errors — don't show toast spam
+    }
+  }, []);
+
+  // Silent refresh of a single job's detail + logs
+  const silentRefreshDetail = useCallback(async (id: number) => {
+    try {
+      const detail = await api.getJob(id);
+      const mapped: Job = {
+        id: detail.id,
+        title: detail.source_title || detail.subreddit || "Untitled",
+        subreddit: detail.subreddit,
+        status: mapBackendStatus(detail.status),
+        created: formatRelativeTime(detail.created_at),
+        started: detail.started_at ? formatRelativeTime(detail.started_at) : null,
+        completed: detail.completed_at ? formatRelativeTime(detail.completed_at) : null,
+        tts: detail.tts_provider,
+        video: detail.status === "completed" || !!detail.video_url || !!detail.uploaded_video_url,
+        video_url: null,
+        access_url: null,
+        error: detail.error_message || undefined,
+        logs: (detail.logs || []).map((l) => ({
+          stage: l.stage,
+          msg: l.message,
+          time: new Date(l.timestamp.endsWith("Z") ? l.timestamp : `${l.timestamp}Z`).toLocaleTimeString(
+            [],
+            { hour: "2-digit", minute: "2-digit" },
+          ),
+        })),
+      };
+      // Auto-fetch video URL the moment job completes
+      if (mapped.video && mapped.status === "completed") {
+        try {
+          const access = await api.getJobAccess(id);
+          mapped.video_url = access.url;
+          mapped.access_url = access.url;
+        } catch {
+          // Ignore — video URL will appear next cycle
+        }
+      }
+      setJobs((prev) => prev.map((j) => (j.id === id ? mapped : j)));
+    } catch {
+      // Silent
+    }
+  }, []);
+
   const loadAdminTarget = useCallback(
     async (userId: number) => {
       setAdminLoadingDetail(true);
@@ -255,6 +322,23 @@ function SageApp() {
       cancelled = true;
     };
   }, [hydrateCurrentUser, loadJobs]);
+
+  // Auto-polling: refresh every 5 s while any job is queued/processing
+  useEffect(() => {
+    if (view !== "app") return;
+    const hasActiveJobs = jobs.some((j) => j.status === "processing" || j.status === "queued");
+    if (!hasActiveJobs) return;
+
+    const interval = setInterval(() => {
+      silentRefreshJobs();
+      // Also refresh logs + status on the detail page
+      if (page === "detail" && activeJobId !== null) {
+        silentRefreshDetail(activeJobId);
+      }
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [view, jobs, page, activeJobId, silentRefreshJobs, silentRefreshDetail]);
 
   const goAuth = (tab: "login" | "signup") => {
     setAuthTab(tab);

@@ -136,6 +136,13 @@ export interface AdminCreditAdjustmentListResponse {
 // API client with authentication
 class ApiClient {
     private token: string | null = null;
+    private readonly STORAGE_KEY = 'sage_auth_token';
+
+    constructor() {
+        // Restore session across page refreshes
+        const stored = localStorage.getItem(this.STORAGE_KEY);
+        if (stored) this.token = stored;
+    }
 
     private getHeaders() {
         const headers: Record<string, string> = {
@@ -151,10 +158,12 @@ class ApiClient {
 
     setToken(token: string) {
         this.token = token;
+        localStorage.setItem(this.STORAGE_KEY, token);
     }
 
     clearToken() {
         this.token = null;
+        localStorage.removeItem(this.STORAGE_KEY);
     }
 
     async login(credentials: LoginRequest): Promise<TokenResponse> {
