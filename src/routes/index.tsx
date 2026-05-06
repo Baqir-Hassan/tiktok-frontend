@@ -228,7 +228,20 @@ function SageApp() {
         error: j.error_message || undefined,
         logs: [],
       }));
-      setJobs(mapped);
+      // Merge with existing state: preserve logs and video URLs already fetched by silentRefreshDetail
+      setJobs((prev) => {
+        const prevMap = new Map(prev.map((j) => [j.id, j]));
+        return mapped.map((j) => {
+          const existing = prevMap.get(j.id);
+          if (!existing) return j;
+          return {
+            ...j,
+            logs: existing.logs,
+            video_url: existing.video_url,
+            access_url: existing.access_url,
+          };
+        });
+      });
     } catch {
       // Silently ignore poll errors — don't show toast spam
     }
