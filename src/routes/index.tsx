@@ -247,7 +247,6 @@ function SageApp() {
     }
   }, []);
 
-  // Silent refresh of a single job's detail + logs
   const silentRefreshDetail = useCallback(async (id: number) => {
     try {
       const detail = await api.getJob(id);
@@ -273,7 +272,10 @@ function SageApp() {
           ),
         })),
       };
-      // Auto-fetch video URL the moment job completes
+      // Auto-fetch video URL the moment job completes, but only if we don't
+      // already have one stored. Replacing video_url on every poll cycle
+      // causes the <video> src to change, which makes the browser reload
+      // the player and interrupt playback.
       if (mapped.video && mapped.status === "completed") {
         try {
           const access = await api.getJobAccess(id);
@@ -283,7 +285,18 @@ function SageApp() {
           // Ignore — video URL will appear next cycle
         }
       }
-      setJobs((prev) => prev.map((j) => (j.id === id ? mapped : j)));
+      setJobs((prev) =>
+        prev.map((j) => {
+          if (j.id !== id) return j;
+          return {
+            ...mapped,
+            // Preserve an already-fetched video URL so the <video> src never
+            // changes after first load — changing src restarts playback.
+            video_url: j.video_url ?? mapped.video_url,
+            access_url: j.access_url ?? mapped.access_url,
+          };
+        }),
+      );
     } catch {
       // Silent
     }
